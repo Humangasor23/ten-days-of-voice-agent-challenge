@@ -148,6 +148,9 @@ This will start:
 ```bash
 # Terminal 1 - LiveKit Server
 livekit-server --dev
+# For windows with VS code download compatable [liveKit_server.exe](https://github.com/livekit/livekit/releases/tag/v1.9.4),
+# and copy pest it in backend folder and when its time to run the server use/run
+.\livekit-server.exe --dev 
 
 # Terminal 2 - Backend Agent
 cd backend
