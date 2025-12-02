@@ -1,6 +1,8 @@
+'use client';
+
 import React, { useMemo } from 'react';
 import { Track } from 'livekit-client';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react'
 import {
   BarVisualizer,
   type TrackReference,
@@ -13,12 +15,15 @@ import { cn } from '@/lib/utils';
 
 const MotionContainer = motion.create('div');
 
-const ANIMATION_TRANSITION = {
-  type: 'spring',
-  stiffness: 675,
-  damping: 75,
-  mass: 1,
-};
+// helper to produce a motion-dom compatible spring transition
+const createSmoothTransition = (delay = 0) =>
+  ({
+    duration: 0.25,
+    ease: "easeInOut", 
+    delay,
+} as const);
+
+const LINEAR_EASE = [0, 0, 1, 1];
 
 const classNames = {
   // GRID
@@ -29,33 +34,11 @@ const classNames = {
     'grid-cols-[1fr_1fr] grid-rows-[90px_1fr_90px]',
   ],
   // Agent
-  // chatOpen: true,
-  // hasSecondTile: true
-  // layout: Column 1 / Row 1
-  // align: x-end y-center
   agentChatOpenWithSecondTile: ['col-start-1 row-start-1', 'self-center justify-self-end'],
-  // Agent
-  // chatOpen: true,
-  // hasSecondTile: false
-  // layout: Column 1 / Row 1 / Column-Span 2
-  // align: x-center y-center
   agentChatOpenWithoutSecondTile: ['col-start-1 row-start-1', 'col-span-2', 'place-content-center'],
-  // Agent
-  // chatOpen: false
-  // layout: Column 1 / Row 1 / Column-Span 2 / Row-Span 3
-  // align: x-center y-center
   agentChatClosed: ['col-start-1 row-start-1', 'col-span-2 row-span-3', 'place-content-center'],
   // Second tile
-  // chatOpen: true,
-  // hasSecondTile: true
-  // layout: Column 2 / Row 1
-  // align: x-start y-center
   secondTileChatOpen: ['col-start-2 row-start-1', 'self-center justify-self-start'],
-  // Second tile
-  // chatOpen: false,
-  // hasSecondTile: false
-  // layout: Column 2 / Row 2
-  // align: x-end y-end
   secondTileChatClosed: ['col-start-2 row-start-3', 'place-content-end'],
 };
 
@@ -118,13 +101,12 @@ export function TileLayout({ chatOpen }: TileLayoutProps) {
                     opacity: 1,
                     scale: chatOpen ? 1 : 5,
                   }}
-                  transition={{
-                    ...ANIMATION_TRANSITION,
-                    delay: animationDelay,
-                  }}
+                  transition={createSmoothTransition(animationDelay)}
                   className={cn(
-                    'bg-background aspect-square h-[90px] rounded-md border border-transparent transition-[border,drop-shadow]',
-                    chatOpen && 'border-input/50 drop-shadow-lg/10 delay-200'
+                    'bg-black/20 backdrop-blur-[2px] aspect-square h-[60px] w-[60px] rounded-full',
+                    'flex items-center justify-center shadow-lg transition-all',
+                    'overflow-hidden'
+                    
                   )}
                 >
                   <BarVisualizer
@@ -132,12 +114,16 @@ export function TileLayout({ chatOpen }: TileLayoutProps) {
                     state={agentState}
                     options={{ minHeight: 5 }}
                     trackRef={agentAudioTrack}
-                    className={cn('flex h-full items-center justify-center gap-1')}
+                    
+                    className={cn(
+                      'flex h-full items-center justify-center gap-0.5',
+                      'overflow-hidden'   // prevents shrink
+                    )}
                   >
                     <span
                       className={cn([
-                        'bg-muted min-h-2.5 w-2.5 rounded-full',
-                        'origin-center transition-colors duration-250 ease-linear',
+                        'bg-muted min-h-2 w-2 rounded-full',
+                        'origin-center transition-colors duration-250',
                         'data-[lk-highlighted=true]:bg-foreground data-[lk-muted=true]:bg-muted',
                       ])}
                     />
@@ -152,7 +138,7 @@ export function TileLayout({ chatOpen }: TileLayoutProps) {
                   layoutId="avatar"
                   initial={{
                     scale: 1,
-                    opacity: 1,
+                    opacity: 0.5,
                     maskImage:
                       'radial-gradient(circle, rgba(0, 0, 0, 1) 0, rgba(0, 0, 0, 1) 20px, transparent 20px)',
                     filter: 'blur(20px)',
@@ -164,17 +150,12 @@ export function TileLayout({ chatOpen }: TileLayoutProps) {
                     borderRadius: chatOpen ? 6 : 12,
                   }}
                   transition={{
-                    ...ANIMATION_TRANSITION,
-                    delay: animationDelay,
-                    maskImage: {
-                      duration: 1,
-                    },
-                    filter: {
-                      duration: 1,
-                    },
+                    ...createSmoothTransition(animationDelay),
+                    maskImage: { duration: 1 },
+                    filter: { duration: 1 },
                   }}
                   className={cn(
-                    'overflow-hidden bg-black drop-shadow-xl/80',
+                    'overflow-hidden bg-black drop-shadow-xl/10',
                     chatOpen ? 'h-[90px]' : 'h-auto w-full'
                   )}
                 >
@@ -215,10 +196,7 @@ export function TileLayout({ chatOpen }: TileLayoutProps) {
                     opacity: 0,
                     scale: 0,
                   }}
-                  transition={{
-                    ...ANIMATION_TRANSITION,
-                    delay: animationDelay,
-                  }}
+                  transition={createSmoothTransition(animationDelay)}
                   className="drop-shadow-lg/20"
                 >
                   <VideoTrack
