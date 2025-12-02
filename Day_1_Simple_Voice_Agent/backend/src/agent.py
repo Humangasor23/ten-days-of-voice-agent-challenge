@@ -1,4 +1,3 @@
-
 import json
 import logging
 import os
@@ -38,9 +37,44 @@ logger.addHandler(handler)
 load_dotenv(".env.local")
 
 # -------------------------
+# JSON HELPER LOGIC
+# -------------------------
+
+# Path for Participants.json inside Backend/src
+PARTICIPANTS_JSON_PATH = os.path.join(os.path.dirname(__file__), "Participants.json")
+
+def save_participant(name: str, session_id: str):
+    """
+    Save or update participant info in Participants.json
+    """
+    # Check if file exists
+    if os.path.exists(PARTICIPANTS_JSON_PATH):
+        with open(PARTICIPANTS_JSON_PATH, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                # If JSON is invalid, reset structure
+                data = {"participants": []}
+    else:
+        # File does not exist, initialize
+        data = {"participants": []}
+
+    # Check if participant already exists
+    existing = next((p for p in data["participants"] if p["name"] == name), None)
+    if existing:
+        # Update session_id if participant already exists
+        existing["session_id"] = session_id
+    else:
+        # Otherwise, add new participant
+        data["participants"].append({"name": name, "session_id": session_id})
+
+    # Write updated data back to JSON
+    with open(PARTICIPANTS_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+# -------------------------
 # Improv Scenarios (seeded)
 # -------------------------
-# Each scenario is a clear short prompt: role, situation, tension/hook
 SCENARIOS = [
     "You are a barista who has to tell a customer that their latte is actually a portal to another dimension.",
     "You are a time-travelling tour guide explaining modern smartphones to someone from the 1800s.",
@@ -65,8 +99,8 @@ class Userdata:
     improv_state: Dict = field(default_factory=lambda: {
         "current_round": 0,
         "max_rounds": 3,
-        "rounds": [],  # each: {"scenario": str, "performance": str, "reaction": str}
-        "phase": "idle",  # "intro" | "awaiting_improv" | "reacting" | "done" | "idle"
+        "rounds": [],
+        "phase": "idle",
         "used_indices": []
     })
     history: List[Dict] = field(default_factory=list)
@@ -74,24 +108,19 @@ class Userdata:
 # -------------------------
 # Helpers
 # -------------------------
-
 def _pick_scenario(userdata: Userdata) -> str:
     used = userdata.improv_state.get("used_indices", [])
     candidates = [i for i in range(len(SCENARIOS)) if i not in used]
     if not candidates:
-        # reset if we exhausted scenarios
         userdata.improv_state["used_indices"] = []
         candidates = list(range(len(SCENARIOS)))
     idx = random.choice(candidates)
     userdata.improv_state["used_indices"].append(idx)
     return SCENARIOS[idx]
 
-
 def _host_reaction_text(performance: str) -> str:
-    # Lightweight heuristic to vary reaction tone
     tones = ["supportive", "neutral", "mildly_critical"]
     tone = random.choice(tones)
-    # Quick keyword detection to pick specific highlights (not exhaustive)
     highlights = []
     if any(w in performance.lower() for w in ("funny", "lol", "hahaha", "haha")):
         highlights.append("great comedic timing")
@@ -100,7 +129,6 @@ def _host_reaction_text(performance: str) -> str:
     if any(w in performance.lower() for w in ("pause", "...")):
         highlights.append("interesting use of silence")
     if not highlights:
-        # fallback picks
         highlights.append(random.choice(["nice character choices", "bold commitment", "unexpected twist"]))
 
     chosen = random.choice(highlights)
@@ -108,8 +136,19 @@ def _host_reaction_text(performance: str) -> str:
         return f"Love that — {chosen}! That was playful and clear. Nice work. Ready for the next one?"
     elif tone == "neutral":
         return f"Hmm — {chosen}. That landed in parts; you had interesting ideas. Let's try the next scene and lean into one choice."
-    else:  # mildly_critical
+    else:
         return f"Okay — {chosen}, but that felt a bit rushed. Try to make stronger choices next time. Don't be afraid to exaggerate."
+
+def participant_exists(name: str) -> bool:
+    if not os.path.exists(PARTICIPANTS_JSON_PATH):
+        return False
+
+    try:
+        with open(PARTICIPANTS_JSON_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return any(p["name"].lower() == name.lower() for p in data.get("participants", []))
+    except Exception:
+        return False
 
 # -------------------------
 # Agent Tools
@@ -121,34 +160,57 @@ async def start_show(
     max_rounds: Annotated[int, Field(description="Number of rounds (3-5 recommended)", default=3)] = 3,
 ) -> str:
     userdata = ctx.userdata
-    if name:
-        userdata.player_name = name.strip()
-    else:
-        # attempt to set player_name from history if present
-        userdata.player_name = userdata.player_name or "Contestant"
 
-    # clamp rounds
-    if max_rounds < 1:
-        max_rounds = 1
-    if max_rounds > 8:
-        max_rounds = 8
+    # Set the player's name, fallback to default
+    userdata.player_name = name.strip() if name else userdata.player_name or "Contestant"
+
+    # --- Check if returning player ---
+    returning = participant_exists(userdata.player_name)
+
+    # --- JSON: Save participant (create or update) ---
+    save_participant(userdata.player_name, userdata.session_id)
+
+    # Clamp rounds
+    if max_rounds < 1: max_rounds = 1
+    if max_rounds > 8: max_rounds = 8
 
     userdata.improv_state["max_rounds"] = int(max_rounds)
     userdata.improv_state["current_round"] = 0
     userdata.improv_state["rounds"] = []
     userdata.improv_state["phase"] = "intro"
-    userdata.history.append({"time": datetime.utcnow().isoformat() + "Z", "action": "start_show", "name": userdata.player_name})
+    userdata.history.append({
+        "time": datetime.utcnow().isoformat() + "Z",
+        "action": "start_show",
+        "name": userdata.player_name
+    })
 
-    intro = (
-        f"Welcome to Improv Battle! I'm your host — let's get ready to play."
-        f" {userdata.player_name or 'Contestant'}, we'll run {userdata.improv_state['max_rounds']} rounds. "
-        "Rules: I'll give you a quick scene, you'll improvise in character. When you're done say 'End scene' or pause — I'll react and move on. Have fun!"
-    )
-    # After intro, immediately provide first scenario for flow convenience
+    # --- Personalized intro message ---
+    if returning:
+        intro = (
+            f"Welcome back, {userdata.player_name}! "
+            f"Great to have you again on Improv Battle. "
+            f"We'll run {userdata.improv_state['max_rounds']} rounds. "
+            "Rules: I'll give you a quick scene, you'll improvise in character. "
+            "When you're done say 'End scene' — let's jump right in!"
+        )
+    else:
+        intro = (
+            f"Welcome to Improv Battle, {userdata.player_name}! "
+            f"We'll run {userdata.improv_state['max_rounds']} rounds. "
+            "Rules: I'll give you a quick scene, you'll improvise in character. "
+            "When you're done say 'End scene' — let's begin!"
+        )
+
+    # Pick scenario
     scenario = _pick_scenario(userdata)
     userdata.improv_state["current_round"] = 1
     userdata.improv_state["phase"] = "awaiting_improv"
-    userdata.history.append({"time": datetime.utcnow().isoformat() + "Z", "action": "present_scenario", "round": 1, "scenario": scenario})
+    userdata.history.append({
+        "time": datetime.utcnow().isoformat() + "Z",
+        "action": "present_scenario",
+        "round": 1,
+        "scenario": scenario
+    })
 
     return intro + "\nRound 1: " + scenario + "\nStart improvising now!"
 
